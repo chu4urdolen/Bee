@@ -1,0 +1,13 @@
+{
+  "iface": "udp",
+  "bt_channel": 3,
+  "bt_bind_mac":  "08:7C:A6:40:42:8B",
+  "bt_allow_mac": "00:E0:4C:23:99:87",
+  "port_tcp_bands": 7778,
+  "bands": 16,
+  "bits_per_band": 3,
+  "grid": { "cols": 16, "rows": 8 },
+  "display": { "driver": "ssd1306", "i2c_bus": 0, "i2c_addr": 60, "width": 128, "height": 64 },
+  "ports": { "udp_bands": 7001, "tcp_bands": 7003, "grid_pixels": 7002 },
+  "fps": 14
+}
