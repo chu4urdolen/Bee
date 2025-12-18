@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Bee — Singularity Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    html, body { height:100%; margin:0; background:#0b0f12; }
+    #map { height:100%; width:100%; }
+    .hud {
+      position:absolute; top:10px; right:10px; z-index:9999;
+      background:rgba(0,0,0,0.65); color:#e7f7f0;
+      padding:10px 12px; border-radius:10px; font:13px system-ui;
+      border:1px solid rgba(50,255,156,0.25);
+    }
+    .hud b { color:#32ff9c; }
+  </style>
+</head>
+<body>
+  <div class="hud"><b>Bee</b> · fog circles · loading…</div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const hud = document.querySelector(".hud");
+    const ME = {"lat": 42.6654177, "lon": 23.3911488, "label": "Bee (current)"};
+
+    async function loadJson(url) {
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) throw new Error(url + " -> " + r.status);
+      return await r.json();
+    }
+
+    (async () => {
+      const map = L.map("map");
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19, attribution: "&copy; OpenStreetMap"
+      }).addTo(map);
+
+      const aps = await loadJson("/static/aps.json");
+
+      const bounds = L.latLngBounds([]);
+      if (ME && Number.isFinite(ME.lat) && Number.isFinite(ME.lon)) {
+        const meLL = L.latLng(ME.lat, ME.lon);
+        bounds.extend(meLL);
+
+        L.circleMarker(meLL, {
+          radius: 7,
+          color: "red",
+          weight: 2,
+          fillColor: "red",
+          fillOpacity: 0.85
+        }).addTo(map).bindPopup(ME.label || "Bee (current)");
+      }
+      let n = 0;
+
+      for (const a of aps) {
+        const lat = Number(a.lat), lon = Number(a.lon), rad = Number(a.radius_m);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(rad)) continue;
+
+        const ll = L.latLng(lat, lon);
+        bounds.extend(ll);
+        n++;
+
+        const label = `${a.mac} · ${a.ssid} · r=${rad.toFixed(1)}m`;
+
+        // radius -> green intensity (smaller radius = darker green)
+        // clamp range so one crazy value doesn't ruin the palette
+        const rMin = 5.0, rMax = 60.0;
+        const t = Math.max(0, Math.min(1, (rad - rMin) / (rMax - rMin))); // 0=small, 1=big
+        const light = 25 + Math.round(t * 45); // 25%..70% (dark..light)
+        const color = `hsl(140 100% ${light}%)`;
+
+        // fixed-size dot (meters) so we see points, not fog rings
+        const dotR = 4.0;
+        L.circleMarker(ll, {
+          radius: dotR,
+          color: color,
+          weight: 2,
+          fillColor: color,
+          fillOpacity: 0.9
+        }).addTo(map).bindPopup(label);        
+      }
+
+      hud.textContent = "Bee · APs: " + n + (ME ? " · me" : "");
+
+      if (n === 0 || !bounds.isValid()) {
+        map.setView([0,0], 2);
+      } else if (n === 1) {
+        map.setView(bounds.getCenter(), 18);
+      } else {
+        map.fitBounds(bounds, { padding: [40,40] });
+      }
+    })().catch(e => {
+      hud.textContent = "Bee · map load failed";
+      alert("Map load failed: " + e);
+      console.error(e);
+    });
+  </script>
+</body>
+</html>

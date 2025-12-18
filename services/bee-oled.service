@@ -1,0 +1,16 @@
+[Unit]
+Description=Bee OLED UI (NanoHat OLED)
+After=multi-user.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/mnt/data/bee/services
+ExecStart=/mnt/data/bee/services/bee_oled.py
+Restart=always
+RestartSec=2
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

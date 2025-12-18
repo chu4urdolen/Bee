@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Bee Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body { height: 100%; margin: 0; background: #0b0f10; color: #e5ffe5; font: 14px/1.35 monospace; }
+    .wrap { display:flex; flex-direction:column; height:100%; }
+    .top { display:flex; gap:8px; padding:10px; border-bottom:1px solid #1c2b1c; background:#0f1510; align-items:center; }
+    button { background:#153015; color:#e5ffe5; border:1px solid #1f3a1f; padding:8px 10px; cursor:pointer; }
+    button:active { transform: translateY(1px); }
+    .muted { color:#9bbf9b; }
+    #chat { flex:1 1 auto; overflow:auto; white-space:pre-wrap; word-wrap:break-word; padding:12px; background:#0a0f0a; }
+    .bar { display:flex; gap:8px; padding:10px; border-top:1px solid #1c2b1c; background:#0f1510; }
+    #msg { flex:1 1 auto; min-width:240px; background:#0a0f0a; color:#e5ffe5; border:1px solid #1c2b1c; padding:10px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <button id="backBtn">&larr; Shell</button>
+      <span class="muted">Bee ↔ Aria (llama.cpp @ 192.168.20.222:8090)</span>
+    </div>
+
+    <div id="chat"></div>
+
+    <div class="bar">
+      <input id="msg" type="text" autocomplete="off" placeholder="Speak, and I will answer…" />
+      <button id="sendBtn">Send</button>
+      <button id="clearBtn">Clear</button>
+    </div>
+  </div>
+
+<script>
+  const chatEl = document.getElementById('chat');
+  const msgEl  = document.getElementById('msg');
+  const sendBtn = document.getElementById('sendBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const backBtn = document.getElementById('backBtn');
+
+  const PASSWORD = sessionStorage.getItem('bee_pwd') || "";
+  if (!PASSWORD) location.href = "/";
+
+  function append(who, text) {
+    chatEl.textContent += `${who}> ${text}\n\n`;
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  async function send() {
+    const m = msgEl.value.trim();
+    if (!m) return;
+    msgEl.value = "";
+    append("you", m);
+    append("bee", "…");
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "X-Auth-Password": PASSWORD },
+        body: JSON.stringify({ message: m })
+      });
+      const j = await res.json();
+      // remove the placeholder "…"
+      chatEl.textContent = chatEl.textContent.replace(/bee> …\n\n$/, "");
+      append("bee", (j && j.reply) ? j.reply : ("(no reply)"));
+    } catch (e) {
+      chatEl.textContent = chatEl.textContent.replace(/bee> …\n\n$/, "");
+      append("bee", "(error talking to Aria)");
+    }
+  }
+
+  msgEl.addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
+  sendBtn.onclick = send;
+  clearBtn.onclick = () => { chatEl.textContent = ""; };
+  backBtn.onclick = () => { location.href = "/"; };
+</script>
+</body>
+</html>

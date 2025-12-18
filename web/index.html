@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Bee Shell</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body { height: 100%; margin: 0; background: #0b0f10; color: #e5ffe5; font: 14px/1.35 monospace; }
+    .wrap { display: flex; flex-direction: column; height: 100%; }
+    #stdout { flex: 1 1 auto; overflow: auto; white-space: pre-wrap; word-wrap: break-word; padding: 12px; border-bottom: 1px solid #1c2b1c; background: #0a0f0a; }
+    #editorPane { flex: 1 1 auto; display:none; }
+    #editorArea { width: 100%; height: 100%; box-sizing: border-box; padding: 12px; border: none; outline: none; background: #0a0f0a; color: #e5ffe5; resize: none; }
+    .bar { display: flex; gap: 8px; padding: 8px; background: #0f1510; align-items: center; flex-wrap: wrap; }
+    input#cmd, input#fname { background: #0a0f0a; color: #e5ffe5; border: 1px solid #1c2b1c; padding: 8px; }
+    input#cmd { flex: 1 1 auto; min-width: 240px; }
+    input#fname { width: 240px; order: 99; }
+    button { background: #153015; color: #e5ffe5; border: 1px solid #1f3a1f; padding: 8px 10px; cursor: pointer; }
+    button:active { transform: translateY(1px); }
+    .muted { color: #9bbf9b; }
+    #cwdHint { display:none; margin-left: 8px; }
+
+    /* login styles */
+    #login-container { display:flex; height:100%; align-items:center; justify-content:center; }
+    #login-box { background:#0a0f0a; border:1px solid #1c2b1c; padding:16px; width:320px; box-shadow: 0 2px 12px rgba(0,0,0,.35); border-radius:12px; }
+    #login-box h2 { margin:0 0 12px 0; font-size:16px; }
+    #login-password { width:100%; background:#0a0f0a; color:#e5ffe5; border:1px solid #1c2b1c; padding:8px; margin-bottom:8px; }
+    #login-btn { width:100%; }
+    #login-error { color:#ff8c8c; display:block; margin-top:6px; min-height:1.2em; }
+  </style>
+</head>
+<body>
+  <!-- Login -->
+  <div id="login-container">
+    <div id="login-box">
+      <h2>Bee Console Login</h2>
+      <input id="login-password" type="password" placeholder="Password" />
+      <button id="login-btn">Login</button>
+      <span id="login-error" class="muted"></span>
+    </div>
+  </div>
+
+  <!-- App (hidden until login) -->
+  <div id="app-container" style="display:none;">
+    <div class="wrap">
+      <div id="stdout" aria-live="polite"></div>
+
+      <!-- Editor pane -->
+      <div id="editorPane">
+        <textarea id="editorArea" spellcheck="false" placeholder="Type here..."></textarea>
+      </div>
+
+      <div class="bar">
+        <input id="cmd" type="text" autocomplete="off" placeholder="Enter Linux command, press Enter to run…" />
+        <button id="runBtn">Run</button>
+        <button id="ctrlC">Ctrl+C</button>
+        <label class="muted"><input type="checkbox" id="autoscroll" checked /> autoscroll</label>
+        <button id="clearBtn">Clear</button>
+
+        <!-- Filename box to the LEFT of Editor -->
+        <input id="fname" type="text" placeholder="filename (e.g., notes.txt)" />
+        <button id="editorBtn">Editor</button>
+        <button id="mapBtn">RSSI map</button>
+        <span id="cwdHint" class="muted"></span>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // -------- login state --------
+  let PASSWORD = ""; // kept in-memory on this tab only
+
+  const loginContainer = document.getElementById('login-container');
+  const appContainer   = document.getElementById('app-container');
+  const loginBtn = document.getElementById('login-btn');
+  const loginPwd = document.getElementById('login-password');
+  const loginErr = document.getElementById('login-error');
+
+  loginBtn.onclick = async () => {
+    const pwd = loginPwd.value;
+    loginErr.textContent = '';
+    try {
+      const res = await fetch('/login', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ password: pwd })
+      });
+      const j = await res.json();
+      if (j.ok) {
+        PASSWORD = pwd;
+        sessionStorage.setItem('bee_pwd', pwd);        
+        loginContainer.style.display = 'none';
+        appContainer.style.display = 'block';
+        if (!fnameEl.value) fnameEl.value = 'new.txt';
+        connectWS();
+        cmdEl.focus();
+      } else {
+        loginErr.textContent = 'Incorrect password';
+      }
+    } catch {
+      loginErr.textContent = 'Login failed';
+    }
+  };
+
+  // -------- terminal/editor from your original --------
+  const stdoutEl = document.getElementById('stdout');
+  const cmdEl = document.getElementById('cmd');
+  const runBtn = document.getElementById('runBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const ctrlCBtn = document.getElementById('ctrlC');
+  const mapBtn = document.getElementById('mapBtn');
+  const autoscrollEl = document.getElementById('autoscroll');
+
+  const editorBtn = document.getElementById('editorBtn');
+  const editorPane = document.getElementById('editorPane');
+  const editorArea = document.getElementById('editorArea');
+  const fnameEl = document.getElementById('fname');
+  const cwdHint = document.getElementById('cwdHint');
+
+  const MAX_LINES = 1000;
+  let editorMode = false;
+  let ws;
+
+  function tailTrim() {
+    const lines = stdoutEl.textContent.split('\n');
+    if (lines.length > MAX_LINES) stdoutEl.textContent = lines.slice(-MAX_LINES).join('\n');
+  }
+  function appendText(t) {
+    stdoutEl.textContent += t;
+    tailTrim();
+    if (autoscrollEl.checked) stdoutEl.scrollTop = stdoutEl.scrollHeight;
+  }
+  function wsURL() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${proto}://${location.host}/stream?token=${encodeURIComponent(PASSWORD)}`;
+  }
+
+  function connectWS() {
+    ws = new WebSocket(wsURL());
+    ws.onopen = () => appendText("\n[connected to Bee shell]\n");
+    ws.onmessage = (ev) => appendText(ev.data);
+    ws.onclose = () => { appendText("\n[disconnected — retrying in 1s]\n"); setTimeout(connectWS, 1000); };
+  }
+
+  async function run(cmd) {
+    if (!cmd.trim()) return;
+    await fetch('/run', { method:'POST',
+      headers:{'Content-Type':'application/json','X-Auth-Password': PASSWORD},
+      body: JSON.stringify({ cmd })
+    });
+  }
+  async function sendSigINT() {
+    await fetch('/signal', { method:'POST',
+      headers:{'Content-Type':'application/json','X-Auth-Password': PASSWORD},
+      body: JSON.stringify({ sig: 'INT' })
+    });
+  }
+  async function fetchCwd() {
+    const r = await fetch('/cwd', { headers:{'X-Auth-Password': PASSWORD} });
+    const j = await r.json(); return j.cwd || null;
+  }
+  async function openFile(name) {
+    const r = await fetch('/open?filename=' + encodeURIComponent(name), { headers:{'X-Auth-Password': PASSWORD} });
+    return await r.json();
+  }
+  async function saveFile(name, content) {
+    const r = await fetch('/save', { method:'POST',
+      headers:{'Content-Type':'application/json','X-Auth-Password': PASSWORD},
+      body: JSON.stringify({ filename: name, content })
+    });
+    return await r.json();
+  }
+
+  cmdEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { run(cmdEl.value); cmdEl.value=''; } });
+  runBtn.onclick   = () => { run(cmdEl.value); cmdEl.value=''; cmdEl.focus(); };
+  clearBtn.onclick = () => { stdoutEl.textContent=''; };
+  ctrlCBtn.onclick = () => sendSigINT();
+  mapBtn.onclick = async () => {
+    if (!PASSWORD) { alert("Login first."); return; }
+
+    mapBtn.disabled = true;
+    const old = mapBtn.textContent;
+    mapBtn.textContent = "Building…";
+
+    try {
+      const r = await fetch('/api/map/rebuild', {
+        method: 'POST',
+        headers: { 'X-Auth-Password': PASSWORD }
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error((j && (j.error || j.step)) ? JSON.stringify(j) : ("HTTP " + r.status));
+
+      window.location.href = '/map.html';
+    } catch (e) {
+      alert("Map build failed: " + e);
+    } finally {
+      mapBtn.disabled = false;
+      mapBtn.textContent = old;
+    }
+  };
+
+  function toggleEditorUI(on) {
+    editorMode = on;
+    stdoutEl.style.display = on ? 'none' : 'block';
+    editorPane.style.display = on ? 'block' : 'none';
+    cmdEl.style.display = runBtn.style.display = ctrlCBtn.style.display = clearBtn.style.display =
+      autoscrollEl.parentElement.style.display = on ? 'none' : 'inline-block';
+    fnameEl.style.display = on ? 'none' : 'inline-block';
+    editorBtn.textContent = on ? 'Save & Close' : 'Editor';
+    cwdHint.style.display = on ? 'inline' : 'none';
+    if (on) editorArea.focus(); else cmdEl.focus();
+  }
+
+  async function openEditorFlow() {
+    const name = fnameEl.value.trim();
+    if (!name) { alert('Please enter a filename (left of Editor).'); fnameEl.focus(); return; }
+    const cwd = await fetchCwd();
+    cwdHint.textContent = cwd ? `[cwd: ${cwd}]` : '';
+    const j = await openFile(name);
+    if (j.ok === false) { alert('Open failed: ' + (j.error || 'unknown error')); return; }
+    editorArea.value = j.exists ? (j.content || '') : '';
+    toggleEditorUI(true);
+  }
+
+  async function saveAndCloseFlow() {
+    const name = fnameEl.value.trim();
+    const content = editorArea.value;
+    const j = await saveFile(name, content);
+    if (!j.ok) { alert('Save failed: ' + (j.error || 'unknown error')); return; }
+    appendText(`\n[saved ${j.bytes} bytes to ${j.path}]\n`);
+    toggleEditorUI(false);
+  }
+
+  editorBtn.onclick = () => { if (!editorMode) openEditorFlow(); else saveAndCloseFlow(); };
+</script>
+</body>
+</html>

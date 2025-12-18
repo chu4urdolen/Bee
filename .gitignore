@@ -1,0 +1,68 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.venv/
+venv/
+ENV/
+env/
+bee_env/
+
+# --- Logs / runtime ---
+*.log
+*.tmp
+tmp
+tmp/
+*.pid
+
+# --- Captures / recon artifacts ---
+*.pcap
+*.pcapng
+*.cap
+graphdb/
+bee_tools/graphdb/
+bee_tools/*.pcap*
+bee_tools/*.log
+
+# --- Databases / data dumps ---
+*.db
+*.sqlite
+*.sqlite3
+gps/*.db
+gps/*.sqlite*
+gps/singularity.db
+gps/heatmaps/
+gps/heatmaps/**
+
+# --- Web generated/static data ---
+web/static/aps.json
+
+# --- C/C++ build artifacts ---
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+*.out
+
+# --- Bee C++ binaries (explicit) ---
+bee-cpp/bee_bt_bridge
+bee-cpp/bee_display_driver
+bee-cpp/bee_spectrum
+bee-cpp/bee_udp_server
+
+# --- OS/editor ---
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.idea/
+.vscode/

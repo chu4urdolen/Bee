@@ -1,0 +1,13 @@
+[Unit]
+Description=Bee: keep Dushich hotspot connected
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/dushich-watch.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
