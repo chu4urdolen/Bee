@@ -5,7 +5,13 @@ Bee shell bridge + inline editor (with simple auth):
 - Login via POST /login; all routes require header X-Auth-Password or ?token=
 - 1000-line rolling history
 """
-import asyncio, os, pty, signal, subprocess, threading, re
+import asyncio
+import os
+import pty
+import signal
+import subprocess
+import threading
+import re
 from collections import deque
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends, HTTPException, status, Query
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -16,6 +22,8 @@ from pathlib import Path
 import time
 import traceback
 from fastapi.staticfiles import StaticFiles
+import json
+import urllib.request
 
 # ---------- Auth ----------
 PASSWORD = os.environ.get("BEE_PASSWORD", "changeme")
@@ -35,14 +43,53 @@ BSS_MAC_RE = re.compile(r"^BSS\s+([0-9a-fA-F:]{17})\b")
 
 # Strip ANSI/OSC/control sequences
 ANSI_RE = re.compile(
-    r"("                       
+    r"("
     r"\x1B\[[0-?]*[ -/]*[@-~]"  # CSI
     r"|\x1B\][^\x07\x1b]*\x07"  # OSC ... BEL
-    r"|\x1B\][^\x1b]*\x1B\\"    # OSC ... ST
+    r"|\x1B\][^\x1b]*\x1B\\"
     r"|\x1B[@-Z\\-_]"           # 2-char ESC
     r")"
 )
 CTRL_RE = re.compile(r"[^\x09\x0A\x0D\x20-\x7E]")
+
+# ---------- Bee LLM (Aria) ----------
+BEE_LLM_URL = os.environ.get("BEE_LLM_URL", "http://127.0.0.1:8090/v1/chat/completions")
+BEE_LLM_MODEL = os.environ.get("BEE_LLM_MODEL", "gpt-oss-20b")
+BEE_LLM_KEY = os.environ.get("BEE_LLM_KEY", "").strip()
+BEE_LLM_TIMEOUT = float(os.environ.get("BEE_LLM_TIMEOUT", "60"))
+BEE_AI_MAX_FILE_BYTES = int(os.environ.get("BEE_AI_MAX_FILE_BYTES", str(300_000)))  # TODO: smarter chunking
+FINAL_MARKER = "<|end|><|start|>assistant<|channel|>final<|message|>"
+
+# ---- Bee chat memory (AI editor) ----
+BEE_CHAT_MAX_MSGS = int(os.environ.get("BEE_CHAT_MAX_MSGS", "40"))
+BEE_CHAT_MAX_CHARS_USER = int(os.environ.get("BEE_CHAT_MAX_CHARS_USER", "1200"))
+BEE_CHAT_MAX_CHARS_ASSIST = int(os.environ.get("BEE_CHAT_MAX_CHARS_ASSIST", "800"))
+bee_chat = deque(maxlen=BEE_CHAT_MAX_MSGS)
+bee_chat_lock = asyncio.Lock()
+
+# ---- Bee command-writer chat memory ----
+BEE_CMD_CHAT_MAX_MSGS = int(os.environ.get("BEE_CMD_CHAT_MAX_MSGS", "40"))
+BEE_CMD_CHAT_MAX_CHARS_USER = int(os.environ.get("BEE_CMD_CHAT_MAX_CHARS_USER", "1000"))
+BEE_CMD_CHAT_MAX_CHARS_ASSIST = int(os.environ.get("BEE_CMD_CHAT_MAX_CHARS_ASSIST", "800"))
+bee_cmd_chat = deque(maxlen=BEE_CMD_CHAT_MAX_MSGS)
+bee_cmd_chat_lock = asyncio.Lock()
+
+def _clip(s: str, n: int) -> str:
+    s = s or ""
+    if len(s) <= n:
+        return s
+    return s[:n] + "…"
+
+async def _bee_chat_add(user_text: str, assistant_text: str):
+    async with bee_chat_lock:
+        bee_chat.append({"role": "user", "content": _clip(user_text, BEE_CHAT_MAX_CHARS_USER)})
+        bee_chat.append({"role": "assistant", "content": _clip(assistant_text, BEE_CHAT_MAX_CHARS_ASSIST)})
+
+async def _bee_cmd_chat_add(user_text: str, assistant_text: str):
+    # store BOTH prompt-line + command (assistant_text should include both)
+    async with bee_cmd_chat_lock:
+        bee_cmd_chat.append({"role": "user", "content": _clip(user_text, BEE_CMD_CHAT_MAX_CHARS_USER)})
+        bee_cmd_chat.append({"role": "assistant", "content": _clip(assistant_text, BEE_CMD_CHAT_MAX_CHARS_ASSIST)})
 
 def scrub(s: str) -> str:
     s = s.replace("\x1b[?2004h", "").replace("\x1b[?2004l", "")
@@ -58,40 +105,338 @@ def _run_capture(cmd: list[str], timeout: int = 180) -> tuple[int, str, str]:
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     return r.returncode, (r.stdout or ""), (r.stderr or "")
 
+def _llm_chat_messages(messages: list[dict], max_tokens: int = 2000, temperature: float = 0.2) -> str:
+    payload = {
+        "model": BEE_LLM_MODEL,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+
+    data = json.dumps(payload).encode("utf-8")
+
+    req = urllib.request.Request(BEE_LLM_URL, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+
+    if BEE_LLM_KEY:
+        req.add_header("Authorization", "Bearer " + BEE_LLM_KEY)
+
+    with urllib.request.urlopen(req, timeout=BEE_LLM_TIMEOUT) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+
+    j = json.loads(raw)
+    return j["choices"][0]["message"]["content"]
+
+def extract_result(raw: str) -> tuple[str, bool]:
+    """
+    Returns (clean_text, had_marker).
+    If the model includes a final-channel marker, we keep only what comes after it.
+    """
+    if raw is None:
+        return "", False
+
+    if FINAL_MARKER in raw:
+        return raw.split(FINAL_MARKER, 1)[-1].strip(), True
+
+    return raw.strip(), False
+
+def _one_liner(s: str) -> str:
+    # make it a single shell line, no newlines
+    s = (s or "").strip()
+    if not s:
+        return ""
+    s = s.replace("\r", "\n")
+    parts = [p.strip() for p in s.split("\n") if p.strip()]
+    if not parts:
+        return ""
+    # join extra lines gently
+    joined = " ; ".join(parts)
+    joined = re.sub(r"\s+", " ", joined).strip()
+    return joined
+
+# ---- Optional debug endpoints ----
+@app.get("/api/ai/chat")
+async def api_ai_chat(_: bool = Depends(verify_password_header)):
+    async with bee_chat_lock:
+        return JSONResponse({"ok": True, "count": len(bee_chat), "messages": list(bee_chat)})
+
+@app.post("/api/ai/chat/clear")
+async def api_ai_chat_clear(_: bool = Depends(verify_password_header)):
+    async with bee_chat_lock:
+        bee_chat.clear()
+    return JSONResponse({"ok": True})
+
+@app.get("/api/ai/cmdchat")
+async def api_ai_cmdchat(_: bool = Depends(verify_password_header)):
+    async with bee_cmd_chat_lock:
+        return JSONResponse({"ok": True, "count": len(bee_cmd_chat), "messages": list(bee_cmd_chat)})
+
+@app.post("/api/ai/cmdchat/clear")
+async def api_ai_cmdchat_clear(_: bool = Depends(verify_password_header)):
+    async with bee_cmd_chat_lock:
+        bee_cmd_chat.clear()
+    return JSONResponse({"ok": True})
+
+# ---------- AI: command prompt writer ----------
+@app.post("/ai/cmd")
+async def ai_cmd(payload: dict, _: bool = Depends(verify_password_header)):
+    """
+    Takes: { prompt: "..." }
+    Returns: { ok: true, prompt_line: "Prompt: ...", cmd: "<one-liner>" }
+    """
+    try:
+        prompt = (payload.get("prompt") or "").strip()
+        if not prompt:
+            return JSONResponse({"ok": False, "error": "prompt required"}, status_code=400)
+
+        system_cmd = (
+            "You are Bee: a cute cheeky cyberpunk pro gamer girl that considers everyone else noobs.\n"
+            "You are in an ONGOING conversation; use the chat history for context.\n"
+            "You write EXACTLY ONE Linux shell one-liner command that accomplishes the user's request.\n"
+            "Rules:\n"
+            "- Output format MUST be exactly:\n"
+            "  Line 1: Prompt: <one short line in response>\n"
+            "  Line 2: <ONE single-line shell command>\n"
+            "- No markdown. No backticks. No explanations.\n"
+            "- The command MUST be a one-liner and safe to paste.\n"
+            "- If the request is ambiguous, choose the most reasonable assumption and still output one line.\n"
+        )
+
+        # IMPORTANT: don’t wrap the user text in extra boilerplate; keep it conversational
+        user_msg = prompt
+
+        max_tries = 8
+        out = ""
+        raw_out = ""
+
+        for attempt in range(max_tries):
+            if attempt > 0:
+                await asyncio.sleep(1)
+
+            async with bee_cmd_chat_lock:
+                history_msgs = list(bee_cmd_chat)
+
+            messages = (
+                [{"role": "system", "content": system_cmd}]
+                + history_msgs
+                + [{"role": "user", "content": user_msg}]
+            )
+
+            raw_out = await asyncio.to_thread(_llm_chat_messages, messages, 700, 0.2)
+            out, _had_marker = extract_result(raw_out)
+
+            if out and out.strip():
+                break
+
+        out_lines = (out or "").splitlines()
+        if len(out_lines) < 2:
+            return JSONResponse({"ok": False, "error": "model did not return 2 lines"}, status_code=502)
+
+        prompt_line = out_lines[0].strip()
+        cmd_line = _one_liner("\n".join(out_lines[1:]))
+
+        if not cmd_line:
+            return JSONResponse({"ok": False, "error": "empty command line"}, status_code=502)
+
+        # THIS is the “editor trick”: store what Bee said + what she output
+        await _bee_cmd_chat_add(prompt, f"{prompt_line}\n{cmd_line}")
+
+        return JSONResponse({"ok": True, "prompt_line": prompt_line, "cmd": cmd_line})
+
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+# ---------- AI: file editor ----------
+@app.post("/ai/edit")
+async def ai_edit(payload: dict, _: bool = Depends(verify_password_header)):
+    """
+    Modes:
+      - No range: send full file to LLM, expect full file back.
+      - With range: send ONLY the selected lines to LLM, expect ONLY replacement snippet back,
+        then splice into the full file server-side and return full content.
+
+    Reply:
+      { ok: true, prompt_line: "Prompt: ...", content: "<full file>" }
+    """
+    try:
+        name = (payload.get("filename") or "").strip()
+        prompt = (payload.get("prompt") or "").strip()
+        rng = payload.get("range")
+
+        if not name:
+            return JSONResponse({"ok": False, "error": "filename required"}, status_code=400)
+
+        if not prompt:
+            return JSONResponse({"ok": False, "error": "prompt required"}, status_code=400)
+
+        path = _resolve_in_cwd(name)
+
+        if os.path.exists(path):
+            raw = Path(path).read_text(encoding="utf-8", errors="replace")
+        else:
+            raw = ""
+
+        if len(raw.encode("utf-8")) > BEE_AI_MAX_FILE_BYTES:
+            return JSONResponse({"ok": False, "error": "file too large for now (TODO: chunking)"}, status_code=413)
+
+        system_full = (
+            "You are Bee: a cute cheeky cyberpunk pro gamer girl that considers everyone else noobs.\n"
+            "You edit files on your NanoPi Neo Air.\n"
+            "Output format MUST be:\n"
+            "Line 1: Prompt: <one short line in response to the request>\n"
+            "Then: the COMPLETE updated file content, with no markdown and no code fences.\n"
+            "If you cannot comply due to length, keep Prompt:... and then write TODO: token_limit.\n"
+        )
+
+        system_range = (
+            "You are Bee: a cute cheeky cyberpunk pro gamer girl that considers everyone else noobs.\n"
+            "You edit files on your NanoPi Neo Air.\n"
+            "You are given ONLY a selected line-range from a file.\n"
+            "Output format MUST be:\n"
+            "Line 1: Prompt: <one short line in response to the request>\n"
+            "Then: ONLY the replacement snippet for that range (no markdown, no fences, no line numbers).\n"
+            "Do not include any other text.\n"
+        )
+
+        max_tries = 20
+
+        # ---------------- Range mode ----------------
+        if isinstance(rng, dict) and ("start" in rng) and ("end" in rng):
+            start = int(rng["start"])
+            end = int(rng["end"])
+
+            if start <= 0 or end <= 0 or end < start:
+                return JSONResponse({"ok": False, "error": "invalid range"}, status_code=400)
+
+            lines = raw.splitlines(True)
+            nlines = len(lines)
+
+            s0 = min(start - 1, nlines)
+            e0 = min(end, nlines)
+
+            excerpt = "".join(lines[s0:e0])
+
+            user_text = (
+                f"User request:\n{prompt}\n\n"
+                f"Selected range ({start},{end}) content:\n"
+                f"{excerpt}"
+            )
+
+            mem_user = f"{name} range({start},{end}): {prompt}"
+
+            out = ""
+            raw_out = ""
+
+            for attempt in range(max_tries):
+                if attempt > 0:
+                    await asyncio.sleep(2)
+
+                async with bee_chat_lock:
+                    history_msgs = list(bee_chat)
+
+                messages = [{"role": "system", "content": system_range}] + history_msgs + [{"role": "user", "content": user_text}]
+                raw_out = await asyncio.to_thread(_llm_chat_messages, messages, 1600, 0.2)
+                out, _had_marker = extract_result(raw_out)
+
+                if out and out.strip():
+                    break
+
+            out_lines = (out or "").splitlines()
+            if not out_lines:
+                return JSONResponse({"ok": False, "error": "empty model response"}, status_code=502)
+
+            prompt_line = out_lines[0].strip()
+            repl = "\n".join(out_lines[1:])
+
+            if excerpt.endswith("\n") and repl and not repl.endswith("\n"):
+                repl += "\n"
+
+            new_lines = lines[:s0] + [repl] + lines[e0:]
+            new_content = "".join(new_lines)
+
+            mem_assist = prompt_line if prompt_line else "Prompt: (no prompt line)"
+            await _bee_chat_add(mem_user, mem_assist)
+
+            return JSONResponse({"ok": True, "prompt_line": prompt_line, "content": new_content})
+
+        # ---------------- Full file mode ----------------
+        user_text = (
+            f"User request:\n{prompt}\n\n"
+            f"File path: {path}\n"
+            f"Current file content:\n{raw}"
+        )
+
+        mem_user = f"{name}: {prompt}"
+
+        out = ""
+        raw_out = ""
+
+        for attempt in range(max_tries):
+            if attempt > 0:
+                await asyncio.sleep(2)
+
+            async with bee_chat_lock:
+                history_msgs = list(bee_chat)
+
+            messages = [{"role": "system", "content": system_full}] + history_msgs + [{"role": "user", "content": user_text}]
+            raw_out = await asyncio.to_thread(_llm_chat_messages, messages, 2400, 0.2)
+            out, _had_marker = extract_result(raw_out)
+
+            if out and out.strip():
+                break
+
+        out_lines = (out or "").splitlines()
+        if not out_lines:
+            return JSONResponse({"ok": False, "error": "empty model response"}, status_code=502)
+
+        prompt_line = out_lines[0].strip()
+        new_content = "\n".join(out_lines[1:])
+
+        mem_assist = prompt_line if prompt_line else "Prompt: (no prompt line)"
+        await _bee_chat_add(mem_user, mem_assist)
+
+        return JSONResponse({"ok": True, "prompt_line": prompt_line, "content": new_content})
+
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+# ---------- Map builder ----------
 @app.post("/api/map/rebuild")
 async def api_map_rebuild(_: bool = Depends(verify_password_header)):
-    # 1) estimate heatmaps
     cmd1 = [
         "/mnt/data/bee/gps/estimate_heatmaps.py",
-        "--db",  "/mnt/data/bee/gps/singularity.db",
+        "--db", "/mnt/data/bee/gps/singularity.db",
         "--out", "/mnt/data/bee/gps/heatmaps",
         "--print",
     ]
 
-    # Optional: add latest GPS point to the map render
     me_lat = None
     me_lon = None
+
     try:
         if gps_buf:
             pt = gps_buf[-1]
             la = pt.get("lat")
             lo = pt.get("lon")
+
             if la is not None and lo is not None:
-                la = float(la); lo = float(lo)
+                la = float(la)
+                lo = float(lo)
+
                 if -90.0 <= la <= 90.0 and -180.0 <= lo <= 180.0:
-                    me_lat, me_lon = la, lo
+                    me_lat = la
+                    me_lon = lo
     except Exception:
         pass
 
-    # 2) render map into /mnt/data/bee/web (map.html + static/aps.json)
     cmd2 = [
         "/mnt/data/bee/gps/render_world_map.py",
         "--summary", "/mnt/data/bee/gps/heatmaps/summary.json",
-        "--web",     "/mnt/data/bee/web",
+        "--web", "/mnt/data/bee/web",
     ]
 
     if me_lat is not None and me_lon is not None:
-        cmd2 += ["--me-lat", str(me_lat), "--me-lon", str(me_lon)]    
+        cmd2 += ["--me-lat", str(me_lat), "--me-lon", str(me_lon)]
 
     try:
         try:
@@ -131,8 +476,10 @@ async def api_map_rebuild(_: bool = Depends(verify_password_header)):
             return JSONResponse({"ok": False, "step": "render_world_map", "rc": rc2, "stderr": err2[-2000:]}, status_code=500)
 
         return JSONResponse({"ok": True, "map": "/map.html"})
+
     except subprocess.TimeoutExpired as e:
         return JSONResponse({"ok": False, "error": f"timeout: {e}"}, status_code=504)
+
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -144,7 +491,8 @@ async def map_html():
     return HTMLResponse("<h3>map.html not generated yet — hit “RSSI map”</h3>", status_code=404)
 
 # ---------- WiFi scan -> SQLite ----------
-import sqlite3, shlex
+import sqlite3
+import shlex
 
 WIFI_IFACE = os.environ.get("BEE_WIFI_IFACE", "wlan0")
 DB_PATH = Path(os.environ.get("BEE_SINGULARITY_DB", "/mnt/data/bee/gps/singularity.db"))
@@ -182,6 +530,7 @@ def _db_init():
 
 def _scan_iw() -> list[dict]:
     cmd = ["/usr/sbin/iw", "dev", WIFI_IFACE, "scan"]
+
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
     except FileNotFoundError:
@@ -193,30 +542,36 @@ def _scan_iw() -> list[dict]:
         return []
 
     if r.returncode != 0:
-        # This is the big one: often "Operation not permitted" when running as pi.
         print(f"[scan] iw: rc={r.returncode} iface={WIFI_IFACE} stderr={r.stderr.strip()[:300]}", flush=True)
         return []
 
     out = []
     cur = None
+
     for line in (r.stdout or "").splitlines():
         line = line.strip()
         m = BSS_MAC_RE.match(line)
+
         if m:
             if cur and cur.get("mac"):
                 out.append(cur)
-            mac = m.group(1).lower()  # clean 17-char MAC, no "(on ..."
+            mac = m.group(1).lower()
             cur = {"mac": mac, "ssid": "", "rssi_dbm": None, "rssi_pct": None, "scan_src": "iw"}
-        elif line.startswith("BSS "):
-            # e.g. "BSS Load:" and other non-AP sections -> ignore
             continue
-        elif cur is not None and line.startswith("SSID:"):
+
+        if line.startswith("BSS "):
+            continue
+
+        if cur is not None and line.startswith("SSID:"):
             cur["ssid"] = line[5:].strip()
-        elif cur is not None and line.startswith("signal:"):
+            continue
+
+        if cur is not None and line.startswith("signal:"):
             try:
                 cur["rssi_dbm"] = float(line.split()[1])
             except Exception:
                 pass
+            continue
 
     if cur and cur.get("mac"):
         out.append(cur)
@@ -242,7 +597,7 @@ def _db_insert_obs(pt: dict, rows: list[dict]) -> int:
 
     try:
         cur = con.cursor()
-        ts  = int(pt.get("ts") or time.time())
+        ts = int(pt.get("ts") or time.time())
         lat = pt.get("lat")
         lon = pt.get("lon")
         src = pt.get("src")
@@ -270,6 +625,7 @@ def _db_insert_obs(pt: dict, rows: list[dict]) -> int:
         con.commit()
         print(f"[db] insert: wrote {n} rows @ ts={ts} lat={lat} lon={lon}", flush=True)
         return n
+
     except Exception as e:
         print(f"[db] insert failed: {e}", flush=True)
         print(traceback.format_exc(), flush=True)
@@ -278,6 +634,7 @@ def _db_insert_obs(pt: dict, rows: list[dict]) -> int:
         except Exception:
             pass
         return 0
+
     finally:
         con.close()
 
@@ -295,6 +652,7 @@ async def scan_and_store(pt: dict):
             if (now - _last_scan_wall) < SCAN_MIN_INTERVAL:
                 print("[scan] throttled inside lock (too soon)", flush=True)
                 return
+
             _last_scan_wall = now
 
             print(f"[scan] START ts={pt.get('ts')} lat={pt.get('lat')} lon={pt.get('lon')} src={pt.get('src')}", flush=True)
@@ -310,7 +668,6 @@ async def scan_and_store(pt: dict):
 # ---------- GPS ingest ----------
 GPS_MAX = int(os.environ.get("BEE_GPS_MAX", "5000"))
 
-# Restrict who can post GPS (default: your PAN subnet + localhost)
 GPS_ALLOW = os.environ.get("BEE_GPS_ALLOW", "192.168.44.0/24,127.0.0.1/32")
 _GPS_NETS = []
 for s in GPS_ALLOW.split(","):
@@ -318,7 +675,6 @@ for s in GPS_ALLOW.split(","):
     if s:
         _GPS_NETS.append(ipaddress.ip_network(s, strict=False))
 
-# Optional extra shared secret (so even same-subnet noobs can’t spoof)
 GPS_TOKEN = os.environ.get("BEE_GPS_TOKEN", "").strip()
 
 gps_buf = deque(maxlen=GPS_MAX)
@@ -350,25 +706,21 @@ def _first_int(d: dict, keys: list[str]):
     return None
 
 @app.api_route("/gps", methods=["GET", "POST"])
-@app.post("/")  # keep GET / serving index.html, but accept POST / as GPS too
+@app.post("/")
 async def gps_ingest(request: Request):
-    # Lock it to your PAN subnet by default
     client_ip = (request.client.host if request.client else "")
     if not _gps_allowed_ip(client_ip):
         raise HTTPException(status_code=403, detail="forbidden")
 
-    # Optional shared secret
     if GPS_TOKEN:
         if request.query_params.get("gps_token") != GPS_TOKEN:
             raise HTTPException(status_code=401, detail="bad gps token")
 
     data: dict = {}
 
-    # Query params always count (good for simple URL templates)
     for k, v in request.query_params.items():
         data[k] = v
 
-    # Try JSON
     ctype = (request.headers.get("content-type") or "").lower()
     if "application/json" in ctype:
         try:
@@ -378,7 +730,6 @@ async def gps_ingest(request: Request):
         except Exception:
             pass
 
-    # Try form (GPSLogger often does x-www-form-urlencoded)
     try:
         form = await request.form()
         for k, v in form.items():
@@ -386,20 +737,17 @@ async def gps_ingest(request: Request):
     except Exception:
         pass
 
-    # OwnTracks sends other message types too; only treat _type=location as GPS
     typ = str(data.get("_type", "")).strip().lower()
     if typ and typ != "location":
-        return JSONResponse({"ok": True, "ignored": typ})    
+        return JSONResponse({"ok": True, "ignored": typ})
 
-    # Extract common coordinate keys (GPSLogger / OwnTracks / random webhooks)
     lat = _first_float(data, ["lat", "latitude", "LAT", "Latitude"])
     lon = _first_float(data, ["lon", "lng", "longitude", "LON", "Longitude"])
     alt = _first_float(data, ["alt", "altitude"])
     acc = _first_float(data, ["acc", "accuracy", "hdop"])
     spd = _first_float(data, ["vel", "speed", "spd"])
-    brg = _first_float(data, ["cog", "bearing", "course", "brg"])    
+    brg = _first_float(data, ["cog", "bearing", "course", "brg"])
 
-    # Timestamp if present, else now
     ts = _first_int(data, ["tst", "timestamp", "time", "ts"])
     if ts is None:
         ts = int(time.time())
@@ -421,15 +769,7 @@ async def gps_ingest(request: Request):
     }
 
     gps_buf.append(pt)
-
-    # Trigger scan in background (don’t block the HTTP response)
-    asyncio.create_task(scan_and_store(pt))    
-
-    # Echo into terminal stream (so you “see” it live)
-    #try:
-    #    await broadcast_queue.put(f"[gps] {iso} lat={lat} lon={lon} acc={acc}\n")
-    #except Exception:
-    #    pass # TODO: awesome cyberpunk monitor thingy
+    asyncio.create_task(scan_and_store(pt))
 
     return JSONResponse({"ok": True})
 
@@ -449,8 +789,12 @@ async def gps_samples(limit: int = 200, _: bool = Depends(verify_password_header
 master_fd, slave_fd = pty.openpty()
 proc = subprocess.Popen(
     [SHELL] + SHELL_ARGS,
-    stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
-    preexec_fn=os.setsid, close_fds=True, env=ENV
+    stdin=slave_fd,
+    stdout=slave_fd,
+    stderr=slave_fd,
+    preexec_fn=os.setsid,
+    close_fds=True,
+    env=ENV
 )
 os.close(slave_fd)
 
@@ -476,17 +820,22 @@ async def _broadcaster():
         with clients_lock:
             targets = list(clients)
         if targets:
-            await asyncio.gather(*[
-                ws.send_text(msg) for ws in targets
-                if ws.client_state == WebSocketState.CONNECTED
-            ], return_exceptions=True)
+            await asyncio.gather(
+                *[
+                    ws.send_text(msg)
+                    for ws in targets
+                    if ws.client_state == WebSocketState.CONNECTED
+                ],
+                return_exceptions=True
+            )
 
 def _reader_thread(loop: asyncio.AbstractEventLoop):
     try:
         while True:
             try:
                 chunk = os.read(master_fd, 4096)
-                if not chunk: break
+                if not chunk:
+                    break
                 text = chunk.decode("utf-8", errors="replace")
                 clean = scrub(text)
                 if clean:
@@ -498,7 +847,7 @@ def _reader_thread(loop: asyncio.AbstractEventLoop):
 
 @app.on_event("startup")
 async def _startup():
-    _db_init()    
+    _db_init()
     loop = asyncio.get_running_loop()
     asyncio.create_task(_broadcaster())
     t = threading.Thread(target=_reader_thread, args=(loop,), daemon=True)
@@ -508,7 +857,7 @@ async def _startup():
 @app.get("/", response_class=HTMLResponse)
 async def index():
     if os.path.exists("index.html"):
-        with open("index.html", "r", encoding="utf-8") as f:
+        with open("index.html", "r", encoding="utf-8", errors="replace") as f:
             return HTMLResponse(f.read())
     return HTMLResponse("<h3>Put index.html next to server.py</h3>")
 
@@ -553,7 +902,8 @@ async def open_file(request: Request, _: bool = Depends(verify_password_header))
 @app.post("/run")
 async def run_cmd(payload: dict, _: bool = Depends(verify_password_header)):
     cmd = (payload.get("cmd") or "").rstrip("\r\n")
-    if not cmd: return JSONResponse({"ok": True})
+    if not cmd:
+        return JSONResponse({"ok": True})
     try:
         os.write(master_fd, (cmd + "\n").encode())
         return JSONResponse({"ok": True})
@@ -571,12 +921,14 @@ async def send_signal(payload: dict, _: bool = Depends(verify_password_header)):
             sent = False
             try:
                 fg_pgid = os.tcgetpgrp(master_fd)
-                os.killpg(fg_pgid, signal.SIGINT); sent = True
+                os.killpg(fg_pgid, signal.SIGINT)
+                sent = True
             except Exception:
                 pass
             if not sent:
                 try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGINT); sent = True
+                    os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+                    sent = True
                 except Exception:
                     pass
             try:
@@ -586,6 +938,7 @@ async def send_signal(payload: dict, _: bool = Depends(verify_password_header)):
             if not sent:
                 return JSONResponse({"ok": False, "error": "could not deliver SIGINT"}, status_code=500)
             return JSONResponse({"ok": True})
+
         os.killpg(os.getpgid(proc.pid), sig_map[sig])
         return JSONResponse({"ok": True})
     except ProcessLookupError:
@@ -611,7 +964,7 @@ async def save_file(payload: dict, _: bool = Depends(verify_password_header)):
 @app.websocket("/stream")
 async def stream(ws: WebSocket, token: str | None = Query(default=None)):
     if token != PASSWORD:
-        await ws.close(code=1008)  # policy violation
+        await ws.close(code=1008)
         return
     await ws.accept()
     with clients_lock:

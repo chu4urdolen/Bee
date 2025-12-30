@@ -5,29 +5,178 @@
   <title>Bee Shell</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    html, body { height: 100%; margin: 0; background: #0b0f10; color: #e5ffe5; font: 14px/1.35 monospace; }
-    .wrap { display: flex; flex-direction: column; height: 100%; }
-    #stdout { flex: 1 1 auto; overflow: auto; white-space: pre-wrap; word-wrap: break-word; padding: 12px; border-bottom: 1px solid #1c2b1c; background: #0a0f0a; }
-    #editorPane { flex: 1 1 auto; display:none; }
-    #editorArea { width: 100%; height: 100%; box-sizing: border-box; padding: 12px; border: none; outline: none; background: #0a0f0a; color: #e5ffe5; resize: none; }
-    .bar { display: flex; gap: 8px; padding: 8px; background: #0f1510; align-items: center; flex-wrap: wrap; }
-    input#cmd, input#fname { background: #0a0f0a; color: #e5ffe5; border: 1px solid #1c2b1c; padding: 8px; }
-    input#cmd { flex: 1 1 auto; min-width: 240px; }
-    input#fname { width: 240px; order: 99; }
-    button { background: #153015; color: #e5ffe5; border: 1px solid #1f3a1f; padding: 8px 10px; cursor: pointer; }
-    button:active { transform: translateY(1px); }
-    .muted { color: #9bbf9b; }
-    #cwdHint { display:none; margin-left: 8px; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #0b0f10;
+      color: #e5ffe5;
+      font: 14px/1.35 monospace;
+    }
+
+    .wrap {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    #stdout {
+      flex: 1 1 auto;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      padding: 12px;
+      border-bottom: 1px solid #1c2b1c;
+      background: #0a0f0a;
+    }
+
+    #editorPane {
+      flex: 1 1 auto;
+      display: none;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    #editorArea {
+      flex: 1 1 auto;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 12px;
+      border: none;
+      outline: none;
+      background: #0a0f0a;
+      color: #e5ffe5;
+      resize: none;
+      min-height: 0;
+    }
+
+    .bar {
+      display: flex;
+      gap: 8px;
+      padding: 8px;
+      background: #0f1510;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    input#cmd,
+    input#fname {
+      background: #0a0f0a;
+      color: #e5ffe5;
+      border: 1px solid #1c2b1c;
+      padding: 8px;
+    }
+
+    input#cmd {
+      flex: 1 1 auto;
+      min-width: 240px;
+    }
+
+    input#fname {
+      width: 240px;
+      order: 99;
+    }
+
+    button {
+      background: #153015;
+      color: #e5ffe5;
+      border: 1px solid #1f3a1f;
+      padding: 8px 10px;
+      cursor: pointer;
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    .muted {
+      color: #9bbf9b;
+    }
+
+    #cwdHint {
+      display: none;
+      margin-left: 8px;
+    }
+
+    #beeCmdPromptLine {
+      display: none;          /* JS will toggle it */
+      flex-basis: 100%;       /* force a new line in the flex-wrap bar */
+      order: 9999;            /* push it to the bottom of the bar */
+      margin-left: 0;         /* left-align */
+      padding-top: 6px;       /* small spacing from buttons row */
+      min-height: 1.2em;
+      white-space: pre-wrap;  /* so your "\n" works if you keep it */
+    }
 
     /* login styles */
-    #login-container { display:flex; height:100%; align-items:center; justify-content:center; }
-    #login-box { background:#0a0f0a; border:1px solid #1c2b1c; padding:16px; width:320px; box-shadow: 0 2px 12px rgba(0,0,0,.35); border-radius:12px; }
-    #login-box h2 { margin:0 0 12px 0; font-size:16px; }
-    #login-password { width:100%; background:#0a0f0a; color:#e5ffe5; border:1px solid #1c2b1c; padding:8px; margin-bottom:8px; }
-    #login-btn { width:100%; }
-    #login-error { color:#ff8c8c; display:block; margin-top:6px; min-height:1.2em; }
+    #login-container {
+      display: flex;
+      height: 100%;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #login-box {
+      background: #0a0f0a;
+      border: 1px solid #1c2b1c;
+      padding: 16px;
+      width: 320px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.35);
+      border-radius: 12px;
+    }
+
+    #login-box h2 {
+      margin: 0 0 12px 0;
+      font-size: 16px;
+    }
+
+    #login-password {
+      width: 100%;
+      background: #0a0f0a;
+      color: #e5ffe5;
+      border: 1px solid #1c2b1c;
+      padding: 8px;
+      margin-bottom: 8px;
+      box-sizing: border-box;
+    }
+
+    #login-btn {
+      width: 100%;
+    }
+
+    #login-error {
+      color: #ff8c8c;
+      display: block;
+      margin-top: 6px;
+      min-height: 1.2em;
+    }
+
+    /* AI prompt pane */
+    #aiPane {
+      padding: 10px 12px;
+      border-bottom: 1px solid #1c2b1c;
+      background: #0f1510;
+    }
+
+    #aiPrompt {
+      width: 100%;
+      box-sizing: border-box;
+      background: #0a0f0a;
+      color: #e5ffe5;
+      border: 1px solid #1c2b1c;
+      padding: 8px;
+      resize: none;
+      min-height: 44px;
+      line-height: 1.35;
+      font-family: monospace;
+    }
+
+    #beePromptLine {
+      margin-top: 6px;
+      min-height: 1.2em;
+    }
   </style>
 </head>
+
 <body>
   <!-- Login -->
   <div id="login-container">
@@ -46,62 +195,55 @@
 
       <!-- Editor pane -->
       <div id="editorPane">
+        <div id="aiPane">
+          <textarea
+            id="aiPrompt"
+            spellcheck="false"
+            placeholder="Talk to Bee…  (example: Hello Bee, please help me fix the script to use UTC.)&#10;Or: (25,47) Bee fix this function, it throws: ..."></textarea>
+          <div id="beePromptLine" class="muted"></div>
+        </div>
+
         <textarea id="editorArea" spellcheck="false" placeholder="Type here..."></textarea>
       </div>
 
       <div class="bar">
-        <input id="cmd" type="text" autocomplete="off" placeholder="Enter Linux command, press Enter to run…" />
+        <input id="cmd" type="text" autocomplete="off" placeholder="Enter Linux command… or start with: Bee, <request>  (Bee will write a one-liner)" />
         <button id="runBtn">Run</button>
         <button id="ctrlC">Ctrl+C</button>
-        <label class="muted"><input type="checkbox" id="autoscroll" checked /> autoscroll</label>
+        <label class="muted">
+          <input type="checkbox" id="autoscroll" checked />
+          autoscroll
+        </label>
         <button id="clearBtn">Clear</button>
 
-        <!-- Filename box to the LEFT of Editor -->
-        <input id="fname" type="text" placeholder="filename (e.g., notes.txt)" />
+        <!-- Editor entry point -->
         <button id="editorBtn">Editor</button>
+
+        <!-- Editor controls (hidden until editor mode) -->
+        <input id="fname" type="text" placeholder="filename (e.g., notes.txt)" style="display:none;" />
+        <button id="askBeeBtn" style="display:none;">Ask Bee</button>
+        <button id="saveBtn" style="display:none;">Save</button>
+        <button id="closeBtn" style="display:none;">Close</button>
+
         <button id="mapBtn">RSSI map</button>
+
         <span id="cwdHint" class="muted"></span>
+        <span id="beeCmdPromptLine" class="muted"></span>
       </div>
     </div>
   </div>
 
 <script>
   // -------- login state --------
-  let PASSWORD = ""; // kept in-memory on this tab only
+  let PASSWORD = "";
 
   const loginContainer = document.getElementById('login-container');
-  const appContainer   = document.getElementById('app-container');
+  const appContainer = document.getElementById('app-container');
   const loginBtn = document.getElementById('login-btn');
   const loginPwd = document.getElementById('login-password');
   const loginErr = document.getElementById('login-error');
 
-  loginBtn.onclick = async () => {
-    const pwd = loginPwd.value;
-    loginErr.textContent = '';
-    try {
-      const res = await fetch('/login', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ password: pwd })
-      });
-      const j = await res.json();
-      if (j.ok) {
-        PASSWORD = pwd;
-        sessionStorage.setItem('bee_pwd', pwd);        
-        loginContainer.style.display = 'none';
-        appContainer.style.display = 'block';
-        if (!fnameEl.value) fnameEl.value = 'new.txt';
-        connectWS();
-        cmdEl.focus();
-      } else {
-        loginErr.textContent = 'Incorrect password';
-      }
-    } catch {
-      loginErr.textContent = 'Login failed';
-    }
-  };
-
-  // -------- terminal/editor from your original --------
+  // -------- terminal/editor elements --------
   const stdoutEl = document.getElementById('stdout');
   const cmdEl = document.getElementById('cmd');
   const runBtn = document.getElementById('runBtn');
@@ -116,19 +258,33 @@
   const fnameEl = document.getElementById('fname');
   const cwdHint = document.getElementById('cwdHint');
 
+  const aiPromptEl = document.getElementById('aiPrompt');
+  const beePromptLineEl = document.getElementById('beePromptLine');
+  const askBeeBtn = document.getElementById('askBeeBtn');
+  const saveBtn = document.getElementById('saveBtn');
+  const closeBtn = document.getElementById('closeBtn');
+
+  const beeCmdPromptLineEl = document.getElementById('beeCmdPromptLine');
+
   const MAX_LINES = 1000;
   let editorMode = false;
   let ws;
 
   function tailTrim() {
     const lines = stdoutEl.textContent.split('\n');
-    if (lines.length > MAX_LINES) stdoutEl.textContent = lines.slice(-MAX_LINES).join('\n');
+    if (lines.length > MAX_LINES) {
+      stdoutEl.textContent = lines.slice(-MAX_LINES).join('\n');
+    }
   }
+
   function appendText(t) {
     stdoutEl.textContent += t;
     tailTrim();
-    if (autoscrollEl.checked) stdoutEl.scrollTop = stdoutEl.scrollHeight;
+    if (autoscrollEl.checked) {
+      stdoutEl.scrollTop = stdoutEl.scrollHeight;
+    }
   }
+
   function wsURL() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     return `${proto}://${location.host}/stream?token=${encodeURIComponent(PASSWORD)}`;
@@ -138,56 +294,379 @@
     ws = new WebSocket(wsURL());
     ws.onopen = () => appendText("\n[connected to Bee shell]\n");
     ws.onmessage = (ev) => appendText(ev.data);
-    ws.onclose = () => { appendText("\n[disconnected — retrying in 1s]\n"); setTimeout(connectWS, 1000); };
+    ws.onclose = () => {
+      appendText("\n[disconnected — retrying in 1s]\n");
+      setTimeout(connectWS, 1000);
+    };
   }
 
   async function run(cmd) {
     if (!cmd.trim()) return;
-    await fetch('/run', { method:'POST',
-      headers:{'Content-Type':'application/json','X-Auth-Password': PASSWORD},
-      body: JSON.stringify({ cmd })
-    });
+    await fetch(
+      '/run',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Auth-Password': PASSWORD
+        },
+        body: JSON.stringify({ cmd })
+      }
+    );
   }
+
   async function sendSigINT() {
-    await fetch('/signal', { method:'POST',
-      headers:{'Content-Type':'application/json','X-Auth-Password': PASSWORD},
-      body: JSON.stringify({ sig: 'INT' })
-    });
+    await fetch(
+      '/signal',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Auth-Password': PASSWORD
+        },
+        body: JSON.stringify({ sig: 'INT' })
+      }
+    );
   }
+
   async function fetchCwd() {
-    const r = await fetch('/cwd', { headers:{'X-Auth-Password': PASSWORD} });
-    const j = await r.json(); return j.cwd || null;
+    const r = await fetch(
+      '/cwd',
+      {
+        headers: { 'X-Auth-Password': PASSWORD }
+      }
+    );
+    const j = await r.json();
+    return j.cwd || null;
   }
+
   async function openFile(name) {
-    const r = await fetch('/open?filename=' + encodeURIComponent(name), { headers:{'X-Auth-Password': PASSWORD} });
-    return await r.json();
-  }
-  async function saveFile(name, content) {
-    const r = await fetch('/save', { method:'POST',
-      headers:{'Content-Type':'application/json','X-Auth-Password': PASSWORD},
-      body: JSON.stringify({ filename: name, content })
-    });
+    const r = await fetch(
+      '/open?filename=' + encodeURIComponent(name),
+      {
+        headers: { 'X-Auth-Password': PASSWORD }
+      }
+    );
     return await r.json();
   }
 
-  cmdEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { run(cmdEl.value); cmdEl.value=''; } });
-  runBtn.onclick   = () => { run(cmdEl.value); cmdEl.value=''; cmdEl.focus(); };
-  clearBtn.onclick = () => { stdoutEl.textContent=''; };
-  ctrlCBtn.onclick = () => sendSigINT();
+  async function saveFile(name, content) {
+    const r = await fetch(
+      '/save',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Auth-Password': PASSWORD
+        },
+        body: JSON.stringify({ filename: name, content })
+      }
+    );
+    return await r.json();
+  }
+
+  function autosizeTA(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 220) + 'px';
+  }
+
+  function parseRangePrefix(s) {
+    const m = s.match(/^\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*/);
+    if (!m) return { range: null, prompt: s };
+    const a = parseInt(m[1], 10);
+    const b = parseInt(m[2], 10);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) {
+      return { range: null, prompt: s };
+    }
+    return {
+      range: { start: Math.min(a, b), end: Math.max(a, b) },
+      prompt: s.slice(m[0].length)
+    };
+  }
+
+  function setEditorBusy(on) {
+    editorArea.readOnly = on;
+    aiPromptEl.readOnly = on;
+
+    fnameEl.disabled = on;
+    askBeeBtn.disabled = on;
+    saveBtn.disabled = on;
+    closeBtn.disabled = on;
+
+    if (on) {
+      beePromptLineEl.textContent = 'Bee is editing…';
+    }
+  }
+
+  async function askBee() {
+    const name = fnameEl.value.trim();
+    if (!name) {
+      alert('Please enter a filename.');
+      fnameEl.focus();
+      return;
+    }
+
+    let raw = aiPromptEl.value || '';
+    raw = raw.trim();
+    if (!raw) {
+      aiPromptEl.focus();
+      return;
+    }
+
+    const pr = parseRangePrefix(raw);
+    const payload = {
+      filename: name,
+      prompt: pr.prompt,
+      range: pr.range
+    };
+
+    setEditorBusy(true);
+
+    try {
+      const r = await fetch(
+        '/ai/edit',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Auth-Password': PASSWORD
+          },
+          body: JSON.stringify(payload)
+        }
+      );
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) {
+        throw new Error(j.error || ('HTTP ' + r.status));
+      }
+
+      beePromptLineEl.textContent = j.prompt_line || '';
+      if (typeof j.content === 'string') {
+        editorArea.value = j.content;
+      }
+    } catch (e) {
+      beePromptLineEl.textContent = '';
+      alert('Bee edit failed: ' + e);
+    } finally {
+      setEditorBusy(false);
+      autosizeTA(aiPromptEl);
+      aiPromptEl.focus();
+    }
+  }
+
+  async function askBeeCmd(line) {
+    // line starts with "Bee, "
+    const prompt = line.slice("Bee, ".length).trim();
+    if (!prompt) return;
+
+    beeCmdPromptLineEl.style.display = 'block';
+    beeCmdPromptLineEl.textContent = "Bee is thinking…";
+
+    try {
+      const r = await fetch(
+        '/ai/cmd',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Auth-Password': PASSWORD
+          },
+          body: JSON.stringify({ prompt })
+        }
+      );
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) {
+        throw new Error(j.error || ('HTTP ' + r.status));
+      }
+
+      beeCmdPromptLineEl.textContent = '\n' + (j.prompt_line || '');        
+      if (typeof j.cmd === 'string') {
+        cmdEl.value = j.cmd;
+        cmdEl.focus();
+        cmdEl.setSelectionRange(cmdEl.value.length, cmdEl.value.length);
+      }
+    } catch (e) {
+      beeCmdPromptLineEl.textContent = '';
+      alert('Bee cmd failed: ' + e);
+    }
+  }
+
+  async function saveOnly() {
+    const name = fnameEl.value.trim();
+    if (!name) {
+      alert('Please enter a filename.');
+      fnameEl.focus();
+      return;
+    }
+
+    const j = await saveFile(name, editorArea.value);
+    if (!j.ok) {
+      alert('Save failed: ' + (j.error || 'unknown error'));
+      return;
+    }
+
+    appendText(`\n[saved ${j.bytes} bytes to ${j.path}]\n`);
+  }
+
+  function toggleEditorUI(on) {
+    editorMode = on;
+
+    stdoutEl.style.display = on ? 'none' : 'block';
+    editorPane.style.display = on ? 'flex' : 'none';
+
+    cmdEl.style.display = on ? 'none' : 'inline-block';
+    runBtn.style.display = on ? 'none' : 'inline-block';
+    ctrlCBtn.style.display = on ? 'none' : 'inline-block';
+    clearBtn.style.display = on ? 'none' : 'inline-block';
+    autoscrollEl.parentElement.style.display = on ? 'none' : 'inline-block';
+    mapBtn.style.display = on ? 'none' : 'inline-block';
+
+    editorBtn.style.display = on ? 'none' : 'inline-block';
+
+    fnameEl.style.display = on ? 'inline-block' : 'none';
+    askBeeBtn.style.display = on ? 'inline-block' : 'none';
+    saveBtn.style.display = on ? 'inline-block' : 'none';
+    closeBtn.style.display = on ? 'inline-block' : 'none';
+
+    cwdHint.style.display = on ? 'inline' : 'none';
+
+    // command Bee prompt line only in non-editor mode
+    beeCmdPromptLineEl.style.display = on ? 'none' : (beeCmdPromptLineEl.textContent ? 'block' : 'none');
+
+    if (on) {
+      autosizeTA(aiPromptEl);
+      aiPromptEl.focus();
+    } else {
+      cmdEl.focus();
+    }
+  }
+
+  async function openEditorFlow() {
+    const name = fnameEl.value.trim();
+    if (!name) {
+      alert('Please enter a filename.');
+      fnameEl.focus();
+      return;
+    }
+
+    const cwd = await fetchCwd();
+    cwdHint.textContent = cwd ? `[cwd: ${cwd}]` : '';
+
+    const j = await openFile(name);
+    if (j.ok === false) {
+      alert('Open failed: ' + (j.error || 'unknown error'));
+      return;
+    }
+
+    editorArea.value = j.exists ? (j.content || '') : '';
+
+    beePromptLineEl.textContent = '';
+    aiPromptEl.value = '';
+    autosizeTA(aiPromptEl);
+
+    toggleEditorUI(true);
+  }
+
+  function closeEditorFlow() {
+    toggleEditorUI(false);
+  }
+
+  // -------- events --------
+  loginBtn.onclick = async () => {
+    const pwd = loginPwd.value;
+    loginErr.textContent = '';
+
+    try {
+      const res = await fetch(
+        '/login',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd })
+        }
+      );
+
+      const j = await res.json();
+      if (j.ok) {
+        PASSWORD = pwd;
+        sessionStorage.setItem('bee_pwd', pwd);
+
+        loginContainer.style.display = 'none';
+        appContainer.style.display = 'block';
+
+        if (!fnameEl.value) {
+          fnameEl.value = 'new.txt';
+        }
+
+        connectWS();
+        cmdEl.focus();
+      } else {
+        loginErr.textContent = 'Incorrect password';
+      }
+    } catch {
+      loginErr.textContent = 'Login failed';
+    }
+  };
+
+  async function handleCmdEnter() {
+    const line = cmdEl.value || '';
+    if (!line.trim()) return;
+
+    // Bee command-writer mode
+    if (line.startsWith("Bee, ")) {
+      const keep = line; // keep original if you want
+      cmdEl.value = "";  // clear while Bee thinks
+      await askBeeCmd(keep);
+      return;
+    }
+
+    // Normal shell mode
+    await run(line);
+    cmdEl.value = '';
+  }
+
+  cmdEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      handleCmdEnter();
+    }
+  });
+
+  runBtn.onclick = () => {
+    handleCmdEnter();
+  };
+
+  clearBtn.onclick = () => {
+    stdoutEl.textContent = '';
+  };
+
+  ctrlCBtn.onclick = () => {
+    sendSigINT();
+  };
+
   mapBtn.onclick = async () => {
-    if (!PASSWORD) { alert("Login first."); return; }
+    if (!PASSWORD) {
+      alert("Login first.");
+      return;
+    }
 
     mapBtn.disabled = true;
     const old = mapBtn.textContent;
     mapBtn.textContent = "Building…";
 
     try {
-      const r = await fetch('/api/map/rebuild', {
-        method: 'POST',
-        headers: { 'X-Auth-Password': PASSWORD }
-      });
+      const r = await fetch(
+        '/api/map/rebuild',
+        {
+          method: 'POST',
+          headers: { 'X-Auth-Password': PASSWORD }
+        }
+      );
+
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.ok) throw new Error((j && (j.error || j.step)) ? JSON.stringify(j) : ("HTTP " + r.status));
+      if (!r.ok || !j.ok) {
+        throw new Error((j && (j.error || j.step)) ? JSON.stringify(j) : ("HTTP " + r.status));
+      }
 
       window.location.href = '/map.html';
     } catch (e) {
@@ -198,39 +677,18 @@
     }
   };
 
-  function toggleEditorUI(on) {
-    editorMode = on;
-    stdoutEl.style.display = on ? 'none' : 'block';
-    editorPane.style.display = on ? 'block' : 'none';
-    cmdEl.style.display = runBtn.style.display = ctrlCBtn.style.display = clearBtn.style.display =
-      autoscrollEl.parentElement.style.display = on ? 'none' : 'inline-block';
-    fnameEl.style.display = on ? 'none' : 'inline-block';
-    editorBtn.textContent = on ? 'Save & Close' : 'Editor';
-    cwdHint.style.display = on ? 'inline' : 'none';
-    if (on) editorArea.focus(); else cmdEl.focus();
-  }
+  editorBtn.onclick = () => {
+    openEditorFlow();
+  };
 
-  async function openEditorFlow() {
-    const name = fnameEl.value.trim();
-    if (!name) { alert('Please enter a filename (left of Editor).'); fnameEl.focus(); return; }
-    const cwd = await fetchCwd();
-    cwdHint.textContent = cwd ? `[cwd: ${cwd}]` : '';
-    const j = await openFile(name);
-    if (j.ok === false) { alert('Open failed: ' + (j.error || 'unknown error')); return; }
-    editorArea.value = j.exists ? (j.content || '') : '';
-    toggleEditorUI(true);
-  }
+  aiPromptEl.addEventListener('input', () => autosizeTA(aiPromptEl));
 
-  async function saveAndCloseFlow() {
-    const name = fnameEl.value.trim();
-    const content = editorArea.value;
-    const j = await saveFile(name, content);
-    if (!j.ok) { alert('Save failed: ' + (j.error || 'unknown error')); return; }
-    appendText(`\n[saved ${j.bytes} bytes to ${j.path}]\n`);
-    toggleEditorUI(false);
-  }
+  askBeeBtn.onclick = () => askBee();
+  saveBtn.onclick = () => saveOnly();
+  closeBtn.onclick = () => closeEditorFlow();
 
-  editorBtn.onclick = () => { if (!editorMode) openEditorFlow(); else saveAndCloseFlow(); };
+  // Start hidden editor controls explicitly
+  toggleEditorUI(false);
 </script>
 </body>
 </html>
