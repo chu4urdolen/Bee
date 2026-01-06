@@ -6,8 +6,8 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/mnt/data/bee/services
-ExecStart=/mnt/data/bee/services/bee_oled.py
+WorkingDirectory=/bee/services
+ExecStart=/bee/services/bee_oled.py
 Restart=always
 RestartSec=2
 KillMode=process

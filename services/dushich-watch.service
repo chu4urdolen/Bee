@@ -5,7 +5,7 @@ Wants=NetworkManager.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/sbin/dushich-watch.sh
+ExecStart=/bee/services/dushich-watch.sh
 Restart=always
 RestartSec=2
 

@@ -61,7 +61,7 @@ def list_tools():
 
 def ip_lines():
     # show IPv4 for all interfaces that are UP and have an address
-    # format: "wlan0 192.168.1.10"
+    # format: "192.168.1.10"
     out = []
     try:
         txt = run(["ip", "-o", "-4", "addr", "show", "up"])
@@ -71,7 +71,7 @@ def ip_lines():
             ifname = parts[1]
             cidr = parts[3]
             ip = cidr.split("/")[0]
-            out.append(f"{ifname}: {ip}")
+            out.append(f"{ip}")
     except Exception:
         pass
     if not out:

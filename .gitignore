@@ -37,9 +37,6 @@ bee_tools/*.log
 *.sqlite3
 gps/*.db
 gps/*.sqlite*
-gps/singularity.db
-gps/heatmaps/
-gps/heatmaps/**
 
 # --- Web generated/static data ---
 web/static/aps.json

@@ -38,7 +38,7 @@ def _load_summary(summary_path: Path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--summary", required=True, help="heatmaps/summary.json")
-    ap.add_argument("--web", default="/mnt/data/bee/web", help="Bee web root (writes map.html + static/aps.json here)")
+    ap.add_argument("--web", default="/bee/web", help="Bee web root (writes map.html + static/aps.json here)")
     ap.add_argument("--me-lat", type=float, default=None, help="Optional current position latitude")
     ap.add_argument("--me-lon", type=float, default=None, help="Optional current position longitude")    
     args = ap.parse_args()

@@ -59,7 +59,8 @@
     }
 
     input#cmd,
-    input#fname {
+    input#fname,
+    input#editorName {
       background: #0a0f0a;
       color: #e5ffe5;
       border: 1px solid #1c2b1c;
@@ -74,6 +75,10 @@
     input#fname {
       width: 240px;
       order: 99;
+    }
+
+    input#editorName {
+      width: 240px;
     }
 
     button {
@@ -217,6 +222,7 @@
         <button id="clearBtn">Clear</button>
 
         <!-- Editor entry point -->
+        <input id="editorName" type="text" placeholder="file to edit (e.g., server.py)" />        
         <button id="editorBtn">Editor</button>
 
         <!-- Editor controls (hidden until editor mode) -->
@@ -253,6 +259,7 @@
   const autoscrollEl = document.getElementById('autoscroll');
 
   const editorBtn = document.getElementById('editorBtn');
+  const editorNameEl = document.getElementById('editorName');  
   const editorPane = document.getElementById('editorPane');
   const editorArea = document.getElementById('editorArea');
   const fnameEl = document.getElementById('fname');
@@ -514,6 +521,7 @@
 
     stdoutEl.style.display = on ? 'none' : 'block';
     editorPane.style.display = on ? 'flex' : 'none';
+    editorNameEl.style.display = on ? 'none' : 'inline-block';      
 
     cmdEl.style.display = on ? 'none' : 'inline-block';
     runBtn.style.display = on ? 'none' : 'inline-block';
@@ -678,6 +686,8 @@
   };
 
   editorBtn.onclick = () => {
+    const n = (editorNameEl.value || '').trim();
+    if (n) fnameEl.value = n;     // this is the editor-mode filename field
     openEditorFlow();
   };
 

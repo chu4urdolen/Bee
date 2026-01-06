@@ -53,7 +53,7 @@ ANSI_RE = re.compile(
 CTRL_RE = re.compile(r"[^\x09\x0A\x0D\x20-\x7E]")
 
 # ---------- Bee LLM (Aria) ----------
-BEE_LLM_URL = os.environ.get("BEE_LLM_URL", "http://127.0.0.1:8090/v1/chat/completions")
+BEE_LLM_URL = os.environ.get("BEE_LLM_URL", "http://192.168.20.222:8090/v1/chat/completions")
 BEE_LLM_MODEL = os.environ.get("BEE_LLM_MODEL", "gpt-oss-20b")
 BEE_LLM_KEY = os.environ.get("BEE_LLM_KEY", "").strip()
 BEE_LLM_TIMEOUT = float(os.environ.get("BEE_LLM_TIMEOUT", "60"))
@@ -405,7 +405,7 @@ async def ai_edit(payload: dict, _: bool = Depends(verify_password_header)):
 async def api_map_rebuild(_: bool = Depends(verify_password_header)):
     cmd1 = [
         "/mnt/data/bee/gps/estimate_heatmaps.py",
-        "--db", "/mnt/data/bee/gps/singularity.db",
+        "--db", "/data/singularity.db",
         "--out", "/mnt/data/bee/gps/heatmaps",
         "--print",
     ]
@@ -495,7 +495,7 @@ import sqlite3
 import shlex
 
 WIFI_IFACE = os.environ.get("BEE_WIFI_IFACE", "wlan0")
-DB_PATH = Path(os.environ.get("BEE_SINGULARITY_DB", "/mnt/data/bee/gps/singularity.db"))
+DB_PATH = Path(os.environ.get("BEE_SINGULARITY_DB", "/data/singularity.db"))
 SCAN_MIN_INTERVAL = float(os.environ.get("BEE_SCAN_MIN_INTERVAL", "8.0"))
 
 _scan_lock = asyncio.Lock()

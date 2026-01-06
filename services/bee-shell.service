@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/mnt/data/bee/web
-EnvironmentFile=/etc/bee-shell.env
-ExecStart=/mnt/data/bee/bee_env/bin/uvicorn server:app --host 0.0.0.0 --port 8088
+User=root
+WorkingDirectory=/bee/web
+EnvironmentFile=/bee/services/bee-shell.env
+ExecStart=/usr/bin/uvicorn server:app --host 0.0.0.0 --port 8088
 Restart=always
 RestartSec=2
 NoNewPrivileges=false

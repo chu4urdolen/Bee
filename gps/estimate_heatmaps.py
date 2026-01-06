@@ -27,7 +27,7 @@ Output:
   summary.json: [{mac, ssid, lat, lon, radius_m, score, mode, n_used}, ...]
 
 Usage:
-  ./estimate_heatmaps.py --db /mnt/data/bee/gps/singularity.db --out /mnt/data/bee/gps/heatmaps --print
+  ./estimate_heatmaps.py --db /data/singularity.db --out /data/heatmaps --print
 
 Important knobs:
   --r-min / --r-max : radius range in meters for strongest..weakest RSSI
@@ -206,7 +206,7 @@ def estimate_one(obs_xy_rssi, lat0, lon0, r_min, r_max, grid_step, grid_max, q_f
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", required=True, help="Path to singularity.db")
-    ap.add_argument("--out", default="/mnt/data/bee/gps/heatmaps", help="Output directory")
+    ap.add_argument("--out", default="/data/heatmaps", help="Output directory")
     ap.add_argument("--trim", type=float, default=0.35, help="Keep strongest fraction per AP (0..1]")
     ap.add_argument("--min-samples", type=int, default=8, help="Minimum samples per AP to emit")
     ap.add_argument("--r-min", type=float, default=8.0, help="Radius for strongest RSSI (meters)")
